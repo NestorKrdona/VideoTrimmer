@@ -5,9 +5,10 @@ Script de Python para recortar videos MP4 manteniendo la calidad y códec origin
 ## Características
 
 ✅ Recorte preciso de videos entre tiempos específicos
-✅ Mantiene el códec y calidad originales (sin recodificación)
-✅ Validaciones completas de entrada
+✅ Dos modos de corte: preciso (recodifica) o rápido (codec copy)
+✅ Validaciones completas de entrada y salida
 ✅ Manejo robusto de errores
+✅ Verificación automática de duración
 ✅ Mensajes informativos de progreso
 ✅ Interfaz de línea de comandos intuitiva
 
@@ -51,7 +52,7 @@ pip install ffmpeg-python
 
 ### Sintaxis básica:
 ```bash
-python video_trimmer.py <video_entrada> <tiempo_inicio> <tiempo_fin> [-o <video_salida>]
+python video_trimmer.py <video_entrada> <tiempo_inicio> <tiempo_fin> [opciones]
 ```
 
 ### Parámetros:
@@ -60,14 +61,16 @@ python video_trimmer.py <video_entrada> <tiempo_inicio> <tiempo_fin> [-o <video_
 - `tiempo_inicio`: Tiempo de inicio en formato `HH:MM:SS`
 - `tiempo_fin`: Tiempo de finalización en formato `HH:MM:SS`
 - `-o, --output`: (Opcional) Nombre del archivo de salida. Por defecto: `input_trimmed.mp4`
+- `--accurate`: Usar modo preciso (recodifica, **recomendado por defecto**)
+- `--fast`: Usar modo rápido (codec copy, puede ser impreciso)
 
 ### Ejemplos:
 
-**1. Recortar del minuto 1:30 al 3:45:**
+**1. Recortar del minuto 1:30 al 3:45 (modo preciso, recomendado):**
 ```bash
 python video_trimmer.py mi_video.mp4 00:01:30 00:03:45
 ```
-Salida: `mi_video_trimmed.mp4`
+Salida: `mi_video_trimmed.mp4` (duración exacta garantizada)
 
 **2. Especificar nombre de salida:**
 ```bash
@@ -80,7 +83,13 @@ Salida: `clip_corto.mp4`
 python video_trimmer.py video.mp4 00:00:00 00:00:30 --output intro.mp4
 ```
 
-**4. Ver ayuda:**
+**4. Usar modo rápido (si la precisión no es crítica):**
+```bash
+python video_trimmer.py video.mp4 00:01:00 00:02:00 --fast
+```
+⚠️ Puede tener imprecisiones de ±1-3 segundos debido a keyframes
+
+**5. Ver ayuda:**
 ```bash
 python video_trimmer.py --help
 ```
@@ -140,14 +149,29 @@ PROCESO COMPLETADO EXITOSAMENTE
 ============================================================
 ```
 
-## Ventajas de usar `codec='copy'`
+## Modos de Corte
 
-El script utiliza `-codec copy` de FFmpeg, lo que significa:
+### Modo PRECISO (por defecto, recomendado)
+**Comando:** `python video_trimmer.py video.mp4 00:01:30 00:03:45`
 
-- ⚡ Velocidad: El proceso es muy rápido (sin recodificación)
-- 🎯 Calidad: No hay pérdida de calidad
-- 💾 Eficiencia: Menor uso de CPU y recursos
-- 📐 Dimensiones: Se mantienen las dimensiones originales
+- ✅ **Exactitud**: Duración exacta al frame, sin errores de reproducción
+- ✅ **Confiabilidad**: Funciona en cualquier punto del video
+- ✅ **Calidad**: Alta calidad (CRF=18, H.264 + AAC)
+- ⚠️ **Velocidad**: Más lento (recodifica el segmento)
+- ⚠️ **Tamaño**: Archivo puede ser ligeramente más grande
+
+**Cuándo usar:** Cuando necesitas duración exacta o el video tendrá uso profesional
+
+### Modo RÁPIDO (opcional)
+**Comando:** `python video_trimmer.py video.mp4 00:01:30 00:03:45 --fast`
+
+- ✅ **Velocidad**: Extremadamente rápido (no recodifica)
+- ✅ **Calidad**: Mantiene códec original sin pérdida
+- ✅ **Eficiencia**: Bajo uso de CPU y recursos
+- ⚠️ **Precisión**: Puede tener ±1-3 segundos de diferencia
+- ⚠️ **Reproducción**: Puede fallar al final del clip
+
+**Cuándo usar:** Cuando la velocidad es prioritaria y la precisión no es crítica
 
 ## Troubleshooting
 
@@ -160,9 +184,23 @@ El script utiliza `-codec copy` de FFmpeg, lo que significa:
 pip install ffmpeg-python
 ```
 
-### El video de salida no se reproduce correctamente
-**Causa posible:** El punto de inicio no coincide con un keyframe
-**Solución:** Ajusta ligeramente el tiempo de inicio (±1 segundo)
+### El video de salida no se reproduce correctamente / duración incorrecta
+**Causa:** Usaste modo `--fast` y el corte no coincide con keyframes
+**Solución:** Usa el modo preciso (por defecto):
+```bash
+python video_trimmer.py video.mp4 00:01:30 00:03:45
+```
+
+### El proceso es muy lento
+**Causa:** El modo preciso recodifica el video
+**Solución:** Si la precisión no es crítica, usa `--fast`:
+```bash
+python video_trimmer.py video.mp4 00:01:30 00:03:45 --fast
+```
+
+### Advertencia: "Diferencia de X.XXs detectada"
+**Significado:** El video de salida tiene una duración diferente a la esperada
+**Solución:** Si usaste `--fast`, prueba con modo preciso (sin flags)
 
 ## Limitaciones
 

@@ -115,25 +115,27 @@ def validate_time_range(start_seconds, end_seconds, video_duration):
         )
 
 
-def trim_video(input_path, output_path, start_time, end_time):
+def trim_video(input_path, output_path, start_time, end_time, accurate=True):
     """
     Recorta el video entre los tiempos especificados.
-    
+
     Args:
         input_path: Ruta del video de entrada
         output_path: Ruta del video de salida
         start_time: Tiempo de inicio en formato "HH:MM:SS"
         end_time: Tiempo de fin en formato "HH:MM:SS"
+        accurate: Si True, usa corte preciso (más lento pero exacto).
+                 Si False, usa codec copy (rápido pero puede ser impreciso)
     """
     print("=" * 60)
     print("RECORTADOR DE VIDEOS")
     print("=" * 60)
-    
+
     # Validar archivo de entrada
     print(f"\n[1/6] Validando archivo de entrada...")
     validate_video_file(input_path)
     print(f"✓ Archivo válido: {input_path}")
-    
+
     # Convertir tiempos a segundos
     print(f"\n[2/6] Procesando tiempos...")
     try:
@@ -146,7 +148,7 @@ def trim_video(input_path, output_path, start_time, end_time):
     except ValueError as e:
         print(f"✗ Error: {str(e)}")
         sys.exit(1)
-    
+
     # Obtener duración del video
     print(f"\n[3/6] Analizando video...")
     try:
@@ -155,7 +157,7 @@ def trim_video(input_path, output_path, start_time, end_time):
     except RuntimeError as e:
         print(f"✗ {str(e)}")
         sys.exit(1)
-    
+
     # Validar rango de tiempo
     print(f"\n[4/6] Validando rango de tiempo...")
     try:
@@ -164,48 +166,79 @@ def trim_video(input_path, output_path, start_time, end_time):
     except ValueError as e:
         print(f"✗ Error: {str(e)}")
         sys.exit(1)
-    
+
     # Verificar si el archivo de salida ya existe
     if os.path.exists(output_path):
         response = input(f"\n⚠ El archivo '{output_path}' ya existe. ¿Sobrescribir? (s/n): ")
         if response.lower() != 's':
             print("Operación cancelada.")
             sys.exit(0)
-    
+
     # Recortar el video
     print(f"\n[5/6] Recortando video...")
-    print("Esto puede tomar unos momentos...")
-    
+    if accurate:
+        print("Modo: PRECISO (recodifica para exactitud)")
+        print("Esto tomará más tiempo pero garantiza duración exacta...")
+    else:
+        print("Modo: RÁPIDO (puede ser impreciso en keyframes)")
+        print("Esto puede tomar unos momentos...")
+
     try:
-        # Usar ffmpeg para recortar manteniendo el códec original
-        stream = ffmpeg.input(input_path, ss=start_seconds, t=duration_seconds)
-        stream = ffmpeg.output(
-            stream,
-            output_path,
-            codec='copy',  # Copia el códec sin recodificar
-            avoid_negative_ts='make_zero'
-        )
-        
+        if accurate:
+            # Método preciso: usa corte en dos pasos
+            # Paso 1: buscar keyframe antes del inicio (rápido)
+            # Paso 2: recodificar desde el punto exacto
+            stream = ffmpeg.input(input_path, ss=start_seconds)
+            stream = ffmpeg.output(
+                stream,
+                output_path,
+                t=duration_seconds,
+                vcodec='libx264',  # Recodifica con H.264
+                acodec='aac',      # Recodifica audio con AAC
+                **{
+                    'crf': '18',   # Calidad alta (0-51, menor = mejor)
+                    'preset': 'medium'  # Balance velocidad/calidad
+                }
+            )
+        else:
+            # Método rápido: codec copy (puede ser impreciso)
+            stream = ffmpeg.input(input_path, ss=start_seconds, t=duration_seconds)
+            stream = ffmpeg.output(
+                stream,
+                output_path,
+                codec='copy',
+                avoid_negative_ts='make_zero'
+            )
+
         # Ejecutar el comando con sobrescritura habilitada
         ffmpeg.run(stream, overwrite_output=True, capture_stdout=True, capture_stderr=True)
-        
+
         print("✓ Video recortado exitosamente")
-        
+
     except ffmpeg.Error as e:
         print(f"✗ Error al recortar el video:")
         print(f"  {e.stderr.decode() if e.stderr else 'Error desconocido'}")
         sys.exit(1)
-    
+
     # Verificar archivo de salida
     print(f"\n[6/6] Verificando resultado...")
     if os.path.exists(output_path):
         output_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+        output_duration = get_video_duration(output_path)
         print(f"✓ Archivo guardado: {output_path}")
         print(f"✓ Tamaño: {output_size:.2f} MB")
+        print(f"✓ Duración real: {output_duration:.2f}s (esperado: {duration_seconds}s)")
+
+        # Advertencia si hay diferencia significativa
+        diff = abs(output_duration - duration_seconds)
+        if diff > 1.0:  # Más de 1 segundo de diferencia
+            print(f"⚠ Diferencia de {diff:.2f}s detectada")
+            if not accurate:
+                print("  Sugerencia: usa --accurate para corte preciso")
     else:
         print(f"✗ Error: No se pudo crear el archivo de salida")
         sys.exit(1)
-    
+
     print("\n" + "=" * 60)
     print("PROCESO COMPLETADO EXITOSAMENTE")
     print("=" * 60)
@@ -221,9 +254,16 @@ Ejemplos de uso:
   python video_trimmer.py input.mp4 00:01:30 00:03:45
   python video_trimmer.py input.mp4 00:01:30 00:03:45 -o output.mp4
   python video_trimmer.py video.mp4 00:00:00 00:00:30 --output clip.mp4
+  python video_trimmer.py video.mp4 00:00:00 00:00:30 --accurate
+  python video_trimmer.py video.mp4 00:00:00 00:00:30 --fast
+
+Modos de corte:
+  --accurate: Corte preciso (recodifica, más lento pero exacto)
+  --fast:     Corte rápido (codec copy, rápido pero puede ser impreciso)
+  Por defecto se usa modo PRECISO para garantizar duración exacta.
         """
     )
-    
+
     parser.add_argument(
         'input',
         help='Ruta del archivo de video de entrada (.mp4)'
@@ -241,16 +281,33 @@ Ejemplos de uso:
         help='Ruta del archivo de salida (por defecto: input_trimmed.mp4)',
         default=None
     )
-    
+    parser.add_argument(
+        '--accurate',
+        action='store_true',
+        help='Usar modo preciso (recodifica, por defecto)'
+    )
+    parser.add_argument(
+        '--fast',
+        action='store_true',
+        help='Usar modo rápido (codec copy, puede ser impreciso)'
+    )
+
     args = parser.parse_args()
-    
+
     # Generar nombre de salida si no se especificó
     if args.output is None:
         base_name = os.path.splitext(args.input)[0]
         args.output = f"{base_name}_trimmed.mp4"
-    
+
+    # Determinar modo (por defecto: accurate)
+    accurate = True
+    if args.fast:
+        accurate = False
+    elif args.accurate:
+        accurate = True
+
     try:
-        trim_video(args.input, args.output, args.start, args.end)
+        trim_video(args.input, args.output, args.start, args.end, accurate=accurate)
     except KeyboardInterrupt:
         print("\n\n✗ Operación cancelada por el usuario")
         sys.exit(1)
